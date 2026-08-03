@@ -1360,3 +1360,28 @@ def test_get_queue_stats_all_agents_comprehensive(
         assert "second_agent" in result["stats"]
         assert result["stats"]["test_agent"]["total_tasks"] == 10
         assert result["stats"]["second_agent"]["total_tasks"] == 5
+
+
+def test_persistence_restart_count_bounds_a_failing_server():
+    """max_restart_attempts has to stop a server that keeps failing.
+
+    Two failures, a clean run that clears the streak, then failures until
+    the failsafe trips: 6 starts. The trailing SystemExit is a
+    BaseException, so run()'s `except Exception` cannot swallow it and a
+    regression fails here instead of looping forever.
+    """
+    aop = AOP(
+        persistence=True, max_restart_attempts=2, restart_delay=0
+    )
+    boom = RuntimeError("bad bind address")
+
+    with patch.object(
+        aop,
+        "start_server",
+        side_effect=[boom, boom, None, boom, boom, boom, SystemExit],
+    ) as start:
+        aop.run()
+
+    assert start.call_count == 6
+    assert aop._restart_count == 3
+    assert aop.get_persistence_status()["remaining_restarts"] == 0
