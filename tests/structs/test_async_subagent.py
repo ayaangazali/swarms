@@ -234,6 +234,27 @@ class TestSubagentRegistry:
         assert len(results) == 10
         reg.shutdown()
 
+    def test_spawns_on_one_agent_run_one_at_a_time(self):
+        spans = []
+
+        class Worker:
+            agent_name = "worker"
+
+            def run(self, task):
+                start = time.monotonic()
+                time.sleep(0.1)
+                spans.append((start, time.monotonic()))
+                return task
+
+        reg = SubagentRegistry()
+        worker = Worker()
+        reg.spawn(worker, "a")
+        reg.spawn(worker, "b")
+        assert sorted(reg.gather()) == ["a", "b"]
+        (_, first_end), (second_start, _) = sorted(spans)
+        assert first_end <= second_start
+        reg.shutdown()
+
     def test_lifecycle_logging(self, caplog):
         """Verify lifecycle events are logged."""
         import logging

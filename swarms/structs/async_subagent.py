@@ -63,6 +63,7 @@ class SubagentRegistry:
         self._tasks: Dict[str, SubagentTask] = {}
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._lock = threading.Lock()
+        self._agent_locks: Dict[int, threading.Lock] = {}
 
     def spawn(
         self,
@@ -125,7 +126,10 @@ class SubagentRegistry:
                     )
                     st.retries = attempt
 
-                result = st.agent.run(st.task_str)
+                with self._agent_locks.setdefault(
+                    id(st.agent), threading.Lock()
+                ):
+                    result = st.agent.run(st.task_str)
                 st.result = result
                 st.status = TaskStatus.COMPLETED
                 st.completed_at = time.time()
