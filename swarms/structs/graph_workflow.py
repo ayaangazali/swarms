@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import hashlib
+import importlib.util
 import json
 import os
 import time
@@ -21,24 +22,6 @@ from typing import (
     Union,
 )
 
-import networkx as nx
-
-try:
-    import graphviz
-
-    GRAPHVIZ_AVAILABLE = True
-except ImportError:
-    GRAPHVIZ_AVAILABLE = False
-    graphviz = None
-
-try:
-    import rustworkx as rx
-
-    RUSTWORKX_AVAILABLE = True
-except ImportError:
-    RUSTWORKX_AVAILABLE = False
-    rx = None
-
 from swarms.structs.agent import Agent  # noqa: F401
 from swarms.structs.conversation import Conversation
 from swarms.utils.get_cpu_cores import get_cpu_cores
@@ -52,6 +35,11 @@ from swarms.utils.generate_id import generate_id
 from swarms.utils.litellm_wrapper import empty_usage
 
 logger = initialize_logger(log_folder="graph_workflow")
+
+GRAPHVIZ_AVAILABLE = importlib.util.find_spec("graphviz") is not None
+RUSTWORKX_AVAILABLE = (
+    importlib.util.find_spec("rustworkx") is not None
+)
 
 
 class GraphBackend:
@@ -194,6 +182,8 @@ class NetworkXBackend(GraphBackend):
         """
         Initialize the NetworkX backend.
         """
+        import networkx as nx
+
         self.graph = nx.DiGraph()
 
     def add_node(self, node_id: str, **attrs) -> None:
@@ -247,6 +237,8 @@ class NetworkXBackend(GraphBackend):
             IDs. A cyclic remainder, if any, is appended as a final layer
             rather than raising.
         """
+        import networkx as nx
+
         try:
             return list(nx.topological_generations(self.graph))
         except nx.NetworkXUnfeasible:
@@ -273,12 +265,16 @@ class NetworkXBackend(GraphBackend):
             return layers
 
     def simple_cycles(self) -> List[List[str]]:
+        import networkx as nx
+
         # Enumerating cycles is exponential, short-circuit the acyclic case
         if nx.is_directed_acyclic_graph(self.graph):
             return []
         return list(nx.simple_cycles(self.graph))
 
     def descendants(self, node_id: str) -> Set[str]:
+        import networkx as nx
+
         return nx.descendants(self.graph, node_id)
 
     def is_dag(self) -> bool:
@@ -288,6 +284,8 @@ class NetworkXBackend(GraphBackend):
         Returns:
             bool: True when the graph contains no directed cycle.
         """
+        import networkx as nx
+
         return nx.is_directed_acyclic_graph(self.graph)
 
     def adjacency(
@@ -323,6 +321,8 @@ class RustworkxBackend(GraphBackend):
             raise ImportError(
                 "rustworkx is not installed. Install it with: pip install rustworkx"
             )
+        import rustworkx as rx
+
         self.graph = rx.PyDiGraph()
         # Mapping from node ID (string) to node index (int)
         self._node_id_to_index: Dict[str, int] = {}
@@ -431,6 +431,8 @@ class RustworkxBackend(GraphBackend):
         return reversed_backend
 
     def topological_generations(self) -> List[List[str]]:
+        import rustworkx as rx
+
         all_indices = list(self._node_id_to_index.values())
         if not all_indices:
             return []
@@ -511,6 +513,8 @@ class RustworkxBackend(GraphBackend):
         return layers or [[index_to_id[idx] for idx in all_indices]]
 
     def simple_cycles(self) -> List[List[str]]:
+        import rustworkx as rx
+
         try:
             # Enumerating cycles is exponential, short-circuit the acyclic case
             if rx.is_directed_acyclic_graph(self.graph):
@@ -527,6 +531,8 @@ class RustworkxBackend(GraphBackend):
             return []
 
     def descendants(self, node_id: str) -> Set[str]:
+        import rustworkx as rx
+
         if node_id not in self._node_id_to_index:
             return set()
         node_index = self._node_id_to_index[node_id]
@@ -544,6 +550,8 @@ class RustworkxBackend(GraphBackend):
         Returns:
             bool: True when the graph contains no directed cycle.
         """
+        import rustworkx as rx
+
         return rx.is_directed_acyclic_graph(self.graph)
 
     def adjacency(
@@ -2522,6 +2530,8 @@ class GraphWorkflow:
             error_msg = "Graphviz is not installed. Install it with: pip install graphviz"
             logger.error(error_msg)
             raise ImportError(error_msg)
+
+        import graphviz
 
         if self.verbose:
             logger.debug(

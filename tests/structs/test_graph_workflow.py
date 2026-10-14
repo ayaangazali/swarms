@@ -1,4 +1,7 @@
 import hashlib
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -1727,6 +1730,23 @@ def test_usage_returns_a_copy():
     wf.usage["input_tokens"] = 999
 
     assert wf.usage["input_tokens"] == 5
+
+
+def test_import_swarms_leaves_the_graph_libraries_unloaded():
+    probe = (
+        "import sys, swarms; "
+        "print(sorted(m for m in ('networkx', 'rustworkx', 'graphviz') "
+        "if m in sys.modules))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+
+    assert result.stdout.splitlines()[-1] == "[]"
 
 
 if __name__ == "__main__":
