@@ -1,3 +1,4 @@
+import copy
 import datetime
 import json
 import os
@@ -1249,6 +1250,15 @@ class Conversation:
                     return truncated_at_sentence
 
         return best_text
+
+    def __deepcopy__(self, memo):
+        clone = self.__class__.__new__(self.__class__)
+        memo[id(self)] = clone
+        for name, value in self.__dict__.items():
+            if name != "_memory_md_lock":
+                value = copy.deepcopy(value, memo)
+            setattr(clone, name, value)
+        return clone
 
     def clear(self):
         """Clear the conversation history."""

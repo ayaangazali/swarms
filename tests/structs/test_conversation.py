@@ -1,3 +1,4 @@
+import copy
 import json
 import concurrent.futures
 import os
@@ -1508,6 +1509,22 @@ def test_token_count_cache_prune_does_not_iterate_the_shared_cache():
     assert set(conv._token_count_cache) == {
         (conv.tokenizer_model_name, "User: kept message")
     }
+
+
+def test_deepcopy_gives_an_independent_history():
+    conv = Conversation()
+    conv.add("User", "first")
+
+    clone = copy.deepcopy(conv)
+    clone.add("User", "second")
+
+    assert [m["content"] for m in conv.conversation_history] == [
+        "first"
+    ]
+    assert [m["content"] for m in clone.conversation_history] == [
+        "first",
+        "second",
+    ]
 
 
 if __name__ == "__main__":
