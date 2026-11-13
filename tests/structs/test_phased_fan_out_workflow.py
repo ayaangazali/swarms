@@ -270,6 +270,33 @@ def test_json_followed_by_prose_is_parsed():
         )
 
 
+@pytest.mark.parametrize(
+    "wrap", ["{}", "```json\n{}\n```", "Files:\n```json\n{}\n```"]
+)
+def test_code_fence_inside_a_json_string_is_parsed(wrap):
+    scan = {
+        "files": ["a.py", "b.py"],
+        "note": "Run:\n```python\nmain()\n```\nfirst.",
+    }
+
+    def handler(agent, task):
+        if task.startswith("List files"):
+            return wrap.format(json.dumps(scan))
+        return f"reviewed {task.split()[1]}"
+
+    FakeAgent.handler = handler
+    workflow = PhasedFanOutWorkflow(
+        lead_agent=FakeLead([fan_out_plan()])
+    )
+    workflow.run("repo")
+
+    assert workflow.last_run["outputs"]["scan"] == scan
+    assert workflow.last_run["outputs"]["review"] == [
+        "reviewed a.py",
+        "reviewed b.py",
+    ]
+
+
 def test_fan_out_over_max_agents_stops_before_starting():
     lead = FakeLead([fan_out_plan()])
     FakeAgent.handler = file_handler(5)

@@ -85,12 +85,17 @@ def _parse_json(raw: Any) -> Any:
     if not isinstance(raw, str):
         return raw
     text = raw.strip()
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-    if fenced:
-        text = fenced.group(1).strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        fenced = re.search(
+            r"```(?:json)?\s*(.*?)```", text, re.DOTALL
+        )
+        if fenced:
+            try:
+                return _parse_json(fenced.group(1))
+            except json.JSONDecodeError:
+                pass
         start = min(
             (i for i in (text.find("{"), text.find("[")) if i != -1),
             default=-1,
