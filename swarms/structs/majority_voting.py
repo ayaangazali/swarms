@@ -351,9 +351,8 @@ class MajorityVoting:
         """Build a copy of this system for one concurrent task.
 
         run replaces the conversation and every voter writes into it, so
-        one instance cannot serve several threads. The copy holds its own
-        copy of every voter and of the consensus agent, and run gives it
-        its own Conversation.
+        one instance cannot serve several threads. The copy gets its own
+        agents, and run gives it its own Conversation.
         """
         clone = copy.copy(self)
         clone.agents = [

@@ -3,6 +3,8 @@ import copy
 from concurrent.futures import as_completed
 from typing import Any, Dict, List, Optional, get_args
 
+from swarms.agents.llm_manager import LLMManager
+from swarms.agents.tool_manager import ToolManager
 from swarms.structs.agent import Agent
 from swarms.structs.context_utils import (
     agent_answer,
@@ -16,7 +18,6 @@ from swarms.structs.comms_channel import (
 from swarms.structs.conversation import Conversation
 from swarms.structs.execution_utils import run_concurrently
 from swarms.structs.ma_blocks import find_agent_by_name
-from swarms.structs.phased_fan_out_workflow import fresh_agent
 from swarms.structs.serialization import SerializableMixin
 from swarms.telemetry.otel import (
     ContextThreadPoolExecutor,
@@ -58,8 +59,8 @@ def agent_for_task(agent: Any) -> Any:
         agent: The agent to copy.
 
     Returns:
-        Any: A rebuilt Agent whose usage still adds up on the original,
-            a deep copy of anything else, or the agent when that fails.
+        Any: An Agent copy on a fresh conversation that shares the model
+            client and usage, or a deep copy of anything else.
     """
     if not isinstance(agent, Agent):
         try:
@@ -67,9 +68,11 @@ def agent_for_task(agent: Any) -> Any:
         except Exception:
             return agent
 
-    copied = fresh_agent(agent)
-    copied.output_type = agent.output_type
-    copied._usage = agent._usage
+    copied = copy.copy(agent)
+    copied.llm_manager = LLMManager(agent=copied)
+    copied.tool_manager = ToolManager(agent=copied)
+    copied._autonomous_loop = None
+    copied.reset()
 
     return copied
 
@@ -1038,8 +1041,7 @@ class AgentRearrange(SerializableMixin):
         Each clone gets:
         - A fresh ``Conversation`` so per-task history does not bleed across
           parallel workers and the original conversation is never mutated.
-        - Its own copy of every agent from agent_for_task, so concurrent
-          tasks never write into one agent's conversation.
+        - Its own copy of every agent, from agent_for_task.
         """
         clone = self.__class__.__new__(self.__class__)
         clone.__dict__.update(self.__dict__)
