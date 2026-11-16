@@ -1,10 +1,10 @@
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from swarms.structs.agent import Agent, reset_agents
-from swarms.structs.context_utils import agent_answer
+from swarms.structs.context_utils import agent_answer, messages_for
 from swarms.structs.comms_channel import (
     CommsChannel,
     claim_agents,
@@ -317,7 +317,7 @@ class ConcurrentWorkflow:
         )
 
         def run_agent_with_status(
-            agent, task, img, imgs, streaming_callback
+            agent, task, img, imgs, streaming_callback, messages
         ):
             status = self.agent_statuses[agent.agent_name]
             status["status"] = "running"
@@ -335,7 +335,12 @@ class ConcurrentWorkflow:
 
             try:
                 output = self._run_agent_with_streaming(
-                    agent, task, img, imgs, dashboard_callback
+                    agent,
+                    task,
+                    img,
+                    imgs,
+                    dashboard_callback,
+                    messages,
                 )
             except Exception as e:
                 status.update(status="error", output=f"Error: {e}")
@@ -395,6 +400,10 @@ class ConcurrentWorkflow:
         Returns:
             Union[Dict, List, str]: Formatted conversation history based on output_type.
         """
+        prior_turns = [
+            messages_for(agent.agent_name, self.conversation) or None
+            for agent in self.agents
+        ]
         self.conversation.add(role="User", content=task)
         run_agent = run_agent or self._run_agent_with_streaming
 
@@ -409,8 +418,9 @@ class ConcurrentWorkflow:
                     img,
                     imgs,
                     streaming_callback,
+                    messages,
                 )
-                for agent in self.agents
+                for agent, messages in zip(self.agents, prior_turns)
             ]
 
             for future, agent in zip(futures, self.agents):
@@ -510,17 +520,29 @@ class ConcurrentWorkflow:
         asyncio.get_running_loop().set_default_executor(
             ThreadPoolExecutor(max_workers=limit)
         )
+        prior_turns = [
+            messages_for(agent.agent_name, self.conversation) or None
+            for agent in self.agents
+        ]
         self.conversation.add(role="User", content=task)
         semaphore = asyncio.Semaphore(limit)
 
-        async def run_agent(agent: Agent) -> Any:
+        async def run_agent(agent: Agent, messages) -> Any:
             async with semaphore:
                 return await self._arun_agent_with_streaming(
-                    agent, task, img, imgs, streaming_callback
+                    agent,
+                    task,
+                    img,
+                    imgs,
+                    streaming_callback,
+                    messages,
                 )
 
         outcomes = await asyncio.gather(
-            *(run_agent(agent) for agent in self.agents),
+            *(
+                run_agent(agent, messages)
+                for agent, messages in zip(self.agents, prior_turns)
+            ),
             return_exceptions=True,
         )
 
@@ -540,6 +562,7 @@ class ConcurrentWorkflow:
         streaming_callback: Optional[
             Callable[[str, str, bool], None]
         ] = None,
+        messages: Optional[List[Dict[str, str]]] = None,
     ):
         """
         Await a single agent with streaming support.
@@ -550,6 +573,7 @@ class ConcurrentWorkflow:
             img (Optional[str]): Single image path for agents that support image input.
             imgs (Optional[List[str]]): List of image paths for agents that support multiple images.
             streaming_callback (Optional[Callable[[str, str, bool], None]]): Callback function for streaming updates.
+            messages (Optional[List[Dict[str, str]]]): Earlier turns the task continues from.
 
         Returns:
             str: The output from the agent.
@@ -558,7 +582,9 @@ class ConcurrentWorkflow:
             Exception: If the agent execution fails.
         """
         if streaming_callback is None:
-            return await agent.arun(task=task, img=img, imgs=imgs)
+            return await agent.arun(
+                task=task, img=img, imgs=imgs, messages=messages
+            )
 
         def emit(chunk: str, is_final: bool) -> None:
             try:
@@ -578,6 +604,7 @@ class ConcurrentWorkflow:
                 img=img,
                 imgs=imgs,
                 streaming_callback=agent_streaming_callback,
+                messages=messages,
             )
         except Exception as e:
             logger.error(f"Agent {agent.agent_name} failed: {str(e)}")
@@ -596,6 +623,7 @@ class ConcurrentWorkflow:
         streaming_callback: Optional[
             Callable[[str, str, bool], None]
         ] = None,
+        messages: Optional[List[Dict[str, str]]] = None,
     ):
         """
         Run single agent with streaming support.
@@ -609,6 +637,7 @@ class ConcurrentWorkflow:
             img (Optional[str]): Single image path for agents that support image input.
             imgs (Optional[List[str]]): List of image paths for agents that support multiple images.
             streaming_callback (Optional[Callable[[str, str, bool], None]]): Callback function for streaming updates.
+            messages (Optional[List[Dict[str, str]]]): Earlier turns, passed only when there are some.
 
         Returns:
             str: The output from the agent.
@@ -616,8 +645,9 @@ class ConcurrentWorkflow:
         Raises:
             Exception: If the agent execution fails.
         """
+        prior = {"messages": messages} if messages else {}
         if streaming_callback is None:
-            return agent.run(task=task, img=img, imgs=imgs)
+            return agent.run(task=task, img=img, imgs=imgs, **prior)
 
         def agent_streaming_callback(chunk: str):
             try:
@@ -635,6 +665,7 @@ class ConcurrentWorkflow:
                 img=img,
                 imgs=imgs,
                 streaming_callback=agent_streaming_callback,
+                **prior,
             )
             # Ensure completion callback is called even if there were issues
             try:

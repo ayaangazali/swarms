@@ -719,6 +719,44 @@ def test_comms_channel_records_answers_in_agent_order(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("on_event_loop", [True, False])
+def test_comms_channel_history_reaches_every_agent(
+    monkeypatch, tmp_path, on_event_loop
+):
+    """A run continues from a non-empty channel on both run paths."""
+    from swarms.structs.file_channel import FileChannel
+    from swarms.utils.litellm_wrapper import LiteLLM
+
+    requests = []
+
+    def fake_run(self, task=None, messages=None, *args, **kwargs):
+        requests.append(" ".join(m["content"] for m in messages))
+        return "an answer"
+
+    async def fake_arun(self, *args, **kwargs):
+        return fake_run(self, *args, **kwargs)
+
+    monkeypatch.setattr(LiteLLM, "run", fake_run)
+    monkeypatch.setattr(LiteLLM, "arun", fake_arun)
+    monkeypatch.setattr(
+        ConcurrentWorkflow,
+        "_runs_on_event_loop",
+        lambda self: on_event_loop,
+    )
+    channel = FileChannel(tmp_path / "run.md")
+    channel.post("Planner", "PLAN-V1: ship in March")
+    agents = [
+        Agent(agent_name=name, model_name="gpt-5.4", print_on=False)
+        for name in ("Alpha", "Beta")
+    ]
+
+    ConcurrentWorkflow(agents=agents, channel=channel).run(
+        "Tighten the plan above."
+    )
+
+    assert ["PLAN-V1" in req for req in requests] == [True, True]
+
+
 class _LoopModel:
     """Model stub that records the thread of each call and how many overlap."""
 
