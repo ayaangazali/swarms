@@ -1,5 +1,6 @@
 import threading
 import time
+from types import SimpleNamespace
 from typing import List, Optional
 from unittest.mock import MagicMock, patch
 
@@ -1739,3 +1740,31 @@ def test_nested_swarm_without_a_name_is_rejected():
     """A swarm needs a name for the flow to reference it."""
     with pytest.raises(ValueError, match="needs a name"):
         AgentRearrange(agents=[_RecordingSwarm("")], flow="x")
+
+
+def test_concurrent_run_gives_each_task_its_own_agents():
+    """No request carries another task, and usage stays on the agents."""
+    tasks = ["TASK-AAA", "TASK-BBB", "TASK-CCC"]
+    requests = []
+    all_running = threading.Barrier(len(tasks), timeout=5)
+
+    def provider(**params):
+        requests.append(str(params["messages"]))
+        all_running.wait()
+        reply = SimpleNamespace(content="done", tool_calls=None)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=reply)],
+            usage={"prompt_tokens": 1},
+        )
+
+    agents = [
+        Agent(agent_name=name, max_loops=2, print_on=False)
+        for name in ("A", "B")
+    ]
+    rearrange = AgentRearrange(agents=agents, flow="A -> B")
+
+    with patch("swarms.utils.litellm_wrapper.completion", provider):
+        rearrange.concurrent_run(tasks)
+
+    assert [sum(t in r for t in tasks) for r in requests] == [1] * 12
+    assert rearrange.usage["input_tokens"] == 12

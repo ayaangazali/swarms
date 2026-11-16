@@ -8,6 +8,7 @@ from swarms.structs.execution_utils import (
     run_concurrently,
 )
 from swarms.structs.agent import Agent
+from swarms.structs.agent_rearrange import agent_for_task
 from swarms.structs.comms_channel import (
     CommsChannel,
     claim_agents,
@@ -349,12 +350,17 @@ class MajorityVoting:
     def _clone_for_task(self) -> "MajorityVoting":
         """Build a copy of this system for one concurrent task.
 
-        ``run`` replaces ``self.conversation`` and every voter writes into
-        it, so one instance cannot serve several threads. The copy shares
-        the agents, as the instance already did; ``run`` gives it its own
-        Conversation.
+        run replaces the conversation and every voter writes into it, so
+        one instance cannot serve several threads. The copy holds its own
+        copy of every voter and of the consensus agent, and run gives it
+        its own Conversation.
         """
-        return copy.copy(self)
+        clone = copy.copy(self)
+        clone.agents = [
+            agent_for_task(agent) for agent in self.agents
+        ]
+        clone.consensus_agent = agent_for_task(self.consensus_agent)
+        return clone
 
     def run_concurrently(
         self, tasks: List[str], *args, **kwargs

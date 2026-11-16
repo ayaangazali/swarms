@@ -16,6 +16,7 @@ from swarms.structs.comms_channel import (
 from swarms.structs.conversation import Conversation
 from swarms.structs.execution_utils import run_concurrently
 from swarms.structs.ma_blocks import find_agent_by_name
+from swarms.structs.phased_fan_out_workflow import fresh_agent
 from swarms.structs.serialization import SerializableMixin
 from swarms.telemetry.otel import (
     ContextThreadPoolExecutor,
@@ -48,6 +49,29 @@ def _split_steps(segments: List[str]) -> List[List[str]]:
         [name.strip() for name in seg.split(",") if name.strip()]
         for seg in segments
     ]
+
+
+def agent_for_task(agent: Any) -> Any:
+    """Copy an agent so one concurrent task has its own conversation.
+
+    Args:
+        agent: The agent to copy.
+
+    Returns:
+        Any: A rebuilt Agent whose usage still adds up on the original,
+            a deep copy of anything else, or the agent when that fails.
+    """
+    if not isinstance(agent, Agent):
+        try:
+            return copy.deepcopy(agent)
+        except Exception:
+            return agent
+
+    copied = fresh_agent(agent)
+    copied.output_type = agent.output_type
+    copied._usage = agent._usage
+
+    return copied
 
 
 class _SwarmMember:
@@ -1014,14 +1038,8 @@ class AgentRearrange(SerializableMixin):
         Each clone gets:
         - A fresh ``Conversation`` so per-task history does not bleed across
           parallel workers and the original conversation is never mutated.
-        - A per-agent ``deepcopy`` where the agent supports it (so stateful
-          agents do not race), falling back to the original instance when
-          deepcopy fails (e.g. the agent holds a ``_thread.lock``, an HTTP
-          connection pool, or other non-picklable resources).
-
-        This replaces a previous ``copy.deepcopy(self)`` strategy that raised
-        ``TypeError: cannot pickle '_thread.lock' object`` whenever any agent
-        contained non-picklable internals.
+        - Its own copy of every agent from agent_for_task, so concurrent
+          tasks never write into one agent's conversation.
         """
         clone = self.__class__.__new__(self.__class__)
         clone.__dict__.update(self.__dict__)
@@ -1034,13 +1052,9 @@ class AgentRearrange(SerializableMixin):
             channel=self.channel,
         )
 
-        cloned_agents: List[Any] = []
-        for agent in self.agents:
-            try:
-                cloned_agents.append(copy.deepcopy(agent))
-            except Exception:
-                cloned_agents.append(agent)
-        clone.agents = cloned_agents
+        clone.agents = [
+            agent_for_task(agent) for agent in self.agents
+        ]
 
         return clone
 
