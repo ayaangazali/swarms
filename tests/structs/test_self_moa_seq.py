@@ -822,5 +822,28 @@ def test_both_agents_are_built_to_return_an_answer_not_a_transcript():
     assert output_types == ["final", "final"]
 
 
+def test_run_sends_each_window_its_best_output_once(mock_agents):
+    proposer, aggregator = mock_agents
+    proposer.run.side_effect = ["S1", "S2", "S3", "S4", "S5"]
+    aggregator.run.side_effect = ["B1", "B2"]
+    seq = SelfMoASeq(
+        num_samples=5, window_size=4, reserved_slots=2, max_loops=5
+    )
+
+    with patch.object(seq, "proposer", proposer), patch.object(
+        seq, "aggregator", aggregator
+    ):
+        seq.run("Write a haiku")
+
+    prompts = [c.args[0] for c in aggregator.run.call_args_list]
+    assert len(prompts) == 2
+    for prompt, best, new in zip(
+        prompts, ["S1", "B1"], [["S2", "S3"], ["S4", "S5"]]
+    ):
+        assert prompt.count(best) == 1
+        assert prompt.count("[Response ") == 2
+        assert all(prompt.count(sample) == 1 for sample in new)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

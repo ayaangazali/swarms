@@ -331,10 +331,9 @@ class SelfMoASeq(SerializableMixin):
                 remaining_samples = remaining_samples[window_size:]
 
                 # Aggregate with bias toward best output
-                window_with_best = [best_output] + current_window
                 best_output = self._aggregate_window(
                     task,
-                    window_with_best,
+                    current_window,
                     best_output,
                 )
 
